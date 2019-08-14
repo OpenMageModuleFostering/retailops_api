@@ -162,7 +162,6 @@ class RetailOps_Api_Model_Catalog_Push_Api extends RetailOps_Api_Model_Catalog_A
      */
     public function catalogPush($productsData)
     {
-        file_put_contents('/tmp/magento_debug', 'catalogPush data ' . var_export($productsData, true) . "\n", FILE_APPEND);
         if (isset($productsData['records'])) {
             $productsData = $productsData['records'];
         }

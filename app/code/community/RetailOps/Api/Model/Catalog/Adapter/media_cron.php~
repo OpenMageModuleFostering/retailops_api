@@ -1,0 +1,8 @@
+<?php
+
+require_once ‘app/Mage.php’;
+Mage::app();
+
+$model = Mage::getModel(‘retailops_api/observer::downloadProductImages’);
+
+$model->run();

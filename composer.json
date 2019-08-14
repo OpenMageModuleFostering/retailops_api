@@ -1,12 +1,12 @@
 {
     "name": "OpenMageModuleFostering/RetailOps_Api",
     "type": "magento-module",
-    "license": "MIT",
+    "license": "Massachusetts-Institute-of-Technology-License-(MITL)",
     "homepage": "",
-    "description": "Seamless integration with the RetailOps distributed order management platform",
+    "description": "Seamless Magento integration with the RetailOps distributed order management platform.",
     "authors": [
     {
-        "name": "RetailOps",
+        "name": "Daniel Norman",
         "email": "daniel@retailops.com"
     }
 ],
