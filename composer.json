@@ -1,0 +1,16 @@
+{
+    "name": "OpenMageModuleFostering/RetailOps_Api",
+    "type": "magento-module",
+    "license": "MIT",
+    "homepage": "",
+    "description": "Seamless integration with the RetailOps distributed order management platform",
+    "authors": [
+    {
+        "name": "RetailOps",
+        "email": "daniel@retailops.com"
+    }
+],
+    "suggest": {
+        "magento-hackathon/magento-composer-installer": "*"
+    }
+}
