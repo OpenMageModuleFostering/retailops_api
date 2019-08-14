@@ -1,7 +1,7 @@
 {
     "name": "OpenMageModuleFostering/RetailOps_Api",
     "type": "magento-module",
-    "license": "Massachusetts-Institute-of-Technology-License-(MITL)",
+    "license": "MIT-License",
     "homepage": "",
     "description": "Seamless Magento integration with the RetailOps distributed order management platform.",
     "authors": [

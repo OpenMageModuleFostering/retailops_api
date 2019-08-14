@@ -229,20 +229,31 @@ class RetailOps_Api_Model_Shipment_Api extends Mage_Sales_Model_Order_Shipment_A
 
                             $invoice = new Varien_Object($invoiceInfo);
                             $invoice->setData('items_to_invoice', $itemsToInvoice);
-
-                            Mage::dispatchEvent(
-                                'retailops_shipment_invoice_before',
-                                array('record' => $invoice)
+                            $invoiceData = array(
+                                'order' => $order,
+                                'record' => $invoice,
+                                'items_to_invoice' => array(
+                                    'qtys' => $itemsToInvoice,
+                                    'shipping_amount' => $this->_fractionalBaseShipping($order, $itemsToInvoice, $isFullyShipped),
+                                ),
                             );
 
+                            Mage::dispatchEvent('retailops_shipment_invoice_before', $invoiceData);
+
                             $invoiceResult = $this->_createInvoiceAndCapture(
-                                    $order,
-                                    $invoice->getItemsToInvoice(),
-                                    $invoice->getCapturedOffline(),
-                                    $invoice->getComment(),
-                                    $invoice->getEmail(),
-                                    $invoice->getIncludeComment()
-                                );
+                                $order,
+                                $invoiceData['items_to_invoice'],
+                                $invoice->getCapturedOffline(),
+                                $invoice->getComment(),
+                                $invoice->getEmail(),
+                                $invoice->getIncludeComment()
+                            );
+
+                            Mage::dispatchEvent('retailops_shipment_invoice_after', array(
+                                'order' => $order,
+                                'invoice' => $invoice,
+                                'result' => $invoiceResult,
+                            ));
 
                             $invoiceResult = array($invoiceResult);
                         }
@@ -293,13 +304,8 @@ class RetailOps_Api_Model_Shipment_Api extends Mage_Sales_Model_Order_Shipment_A
                     if (!$order->getId()) {
                         throw new Exception('Order is not found');
                     }
-                    Mage::dispatchEvent(
-                        'retailops_order_close_before',
-                        array('order' => $order)
-                    );
                     $items = $order->getAllItems();
                     $itemsToReturn = array();
-                    $itemsToCancel = array();
                     $itemsToCapture = array();
                     /** @var $item Mage_Sales_Model_Order_Item  */
                     foreach ($items as $item) {
@@ -324,11 +330,27 @@ class RetailOps_Api_Model_Shipment_Api extends Mage_Sales_Model_Order_Shipment_A
                            }
                         }
                     }
-                    if ($itemsToCapture) {
-                        $result['invoice_result'] = $this->_createInvoiceAndCapture($order, $itemsToCapture, $orderData['captured_offline']);
+                    $closeData = array(
+                        'order' => $order,
+                        'items_to_capture' => array(
+                            'qtys' => $itemsToCapture,
+                            'shipping_amount' => $this->_fractionalBaseShipping($order, $itemsToCapture),
+                        ),
+                        'items_to_return' => array(
+                            'qtys' => $itemsToReturn,
+                            'shipping_amount' => $this->_fractionalBaseShipping($order, $itemsToReturn),
+                        ),
+                    );
+
+                    Mage::dispatchEvent('retailops_order_close_before', $closeData);
+
+                    if (count($closeData['items_to_capture']['qtys'])) {
+                        $result['invoice_result'] = $this->_createInvoiceAndCapture(
+                            $order, $closeData['items_to_capture'], $orderData['captured_offline']);
                     }
-                    if ($itemsToReturn) {
-                        $result['creditmemo_result'] = $this->_getCreditMemoApi()->create($order, array('qtys' => $itemsToReturn), $orderData['captured_offline']);
+                    if (count($closeData['items_to_return']['qtys'])) {
+                        $result['creditmemo_result'] = $this->_getCreditMemoApi()->create(
+                            $order, $closeData['items_to_return'], $orderData['captured_offline']);
                     }
                     /**
                      * Cancel the rest items if any
@@ -339,6 +361,14 @@ class RetailOps_Api_Model_Shipment_Api extends Mage_Sales_Model_Order_Shipment_A
                     }
                     $order->save();
                     $result['status'] = RetailOps_Api_Helper_Data::API_STATUS_SUCCESS;
+
+                    Mage::dispatchEvent(
+                        'retailops_order_close_after',
+                        array(
+                            'order' => $order,
+                            'result' => $result,
+                        )
+                    );
                 }
             } catch (Exception $e) {
                 $result['status'] = RetailOps_Api_Helper_Data::API_STATUS_FAIL;
@@ -360,6 +390,25 @@ class RetailOps_Api_Model_Shipment_Api extends Mage_Sales_Model_Order_Shipment_A
         return Mage::getModel('retailops_api/return_api');
     }
 
+    protected function _fractionalBaseShipping($order, $qtys = array(), $fullyShipped = false)
+    {
+        if (!count($qtys) && $fullyShipped) {
+            return $order->getBaseShippingAmount();
+        }
+
+        $itemsTotal = 0;
+        $qtysTotal = 0;
+        $items = $order->getAllItems();
+        foreach ($items as $item) {
+            $itemsTotal += $item->getBaseRowTotal();
+            if (isset($qtys[$item->getId()])) {
+                $qtysTotal += $item->getBaseRowTotal() * ($qtys[$item->getId()] / $item->getQtyOrdered());
+            }
+        }
+
+        return $order->getBaseShippingAmount() * ($qtysTotal / $itemsTotal);
+    }
+
     /**
      * @param Mage_Sales_Model_Order $order
      * @param array $itemsQty
@@ -368,18 +417,40 @@ class RetailOps_Api_Model_Shipment_Api extends Mage_Sales_Model_Order_Shipment_A
      * @param bool $includeComment
      * @return string
      */
-    protected function _createInvoiceAndCapture($order, $itemsQty, $capturedOffline = false, $comment = null, $email = false, $includeComment = false)
+    protected function _createInvoiceAndCapture($order, $invoiceData, $capturedOffline = false, $comment = null, $email = false, $includeComment = false)
     {
         /** @var $helper RetailOps_Api_Helper_Data */
         $helper = Mage::helper('retailops_api');
         try {
             $itemsQtyFomratted = array();
-            if ($itemsQty) {
+            if ($invoiceData && $invoiceData['qtys']) {
                 foreach ($order->getAllItems() as $item) {
-                    $itemsQtyFomratted[$item->getId()] = isset($itemsQty[$item->getId()]) ? $itemsQty[$item->getId()] : 0;
+                    $itemsQtyFomratted[$item->getId()]
+                        = isset($invoiceData['qtys'][$item->getId()]) ? $invoiceData['qtys'][$item->getId()] : 0;
                 }
             }
             $invoice = $order->prepareInvoice($itemsQtyFomratted);
+
+            if (isset($invoiceData['shipping_amount'])) {
+                $originalInvoiceShippingAmount = $invoice->getShippingAmount();
+                $originalInvoiceBaseShippingAmount = $invoice->getBaseShippingAmount();
+
+                $shippingPercent = $invoiceData['shipping_amount'] / $order->getBaseShippingAmount();
+
+                $newInvoiceShippingAmount = $order->getShippingAmount() * $shippingPercent;
+                $newInvoiceBaseShippingAmount = $invoiceData['shipping_amount'];
+
+                $invoice->setShippingAmount(Mage::app()->getStore()->roundPrice($newInvoiceShippingAmount));
+                $invoice->setBaseShippingAmount(Mage::app()->getStore()->roundPrice($newInvoiceBaseShippingAmount));
+                $invoice->setShippingInclTax(Mage::app()->getStore()->roundPrice($order->getShippingInclTax() * $shippingPercent));
+                $invoice->setBaseShippingInclTax(Mage::app()->getStore()->roundPrice($order->getBaseShippingInclTax() * $shippingPercent));
+
+                $invoice->setGrandTotal(Mage::app()->getStore()->roundPrice(
+                    $invoice->getGrandTotal() - ($originalInvoiceShippingAmount - $newInvoiceShippingAmount)));
+                $invoice->setBaseGrandTotal(Mage::app()->getStore()->roundPrice(
+                    $invoice->getBaseGrandTotal() - ($originalInvoiceBaseShippingAmount - $newInvoiceBaseShippingAmount)));
+            }
+
             $invoice->setRequestedCaptureCase($capturedOffline
                 ? Mage_Sales_Model_Order_Invoice::CAPTURE_OFFLINE : Mage_Sales_Model_Order_Invoice::CAPTURE_ONLINE);
             $invoice->register();
